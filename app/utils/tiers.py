@@ -48,7 +48,11 @@ def get_tier_limits(plan: str | None) -> TierLimits:
     
     # Normalize naming (e.g. "free" or "FREE" -> "Free")
     norm = plan.strip().capitalize()
+    if norm in ("Ultra", "Mega"):
+        norm = "Enterprise"
+        
     if norm in TIERS:
         return TIERS[norm]
         
     return TIERS["Free"]
+
