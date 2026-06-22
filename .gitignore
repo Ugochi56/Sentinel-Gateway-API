@@ -1,0 +1,21 @@
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+# Testing files
+test_api.py
+register_github.py
