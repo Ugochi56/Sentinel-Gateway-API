@@ -59,6 +59,7 @@ app.include_router(logs.router, tags=["Logs"])
 
 
 @app.get("/health", tags=["System"])
+@app.head("/health", tags=["System"])
 async def health():
     """UptimeRobot pings this to keep Render from sleeping."""
     return {"status": "ok", "service": "sentinel-gateway"}
