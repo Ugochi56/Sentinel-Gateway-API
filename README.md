@@ -33,6 +33,17 @@ Provider (Stripe/GitHub/etc.)
 | 5     | 16 min  | 31 min     |
 | 6     | 32 min  | 63 min → **failed_permanently** |
 
+## Monetization Tiers & Limits
+
+Sentinel Gateway enforces subscription-based limits matching your RapidAPI pricing plans. The gateway automatically reads the user's plan from the `X-RapidAPI-Plan` header and applies the corresponding limits:
+
+| Plan Name | Price | Monthly Requests | Max Endpoints | Max Payload Size | Max Retries | Log Retention |
+|---|---|---|---|---|---|---|
+| **Free** (default) | **$0/mo** | 1,000 / mo | 5 | 1 MB | 5 attempts | 3 days |
+| **Basic** | **$19/mo** | 50,000 / mo | 25 | 5 MB | 10 attempts | 7 days |
+| **Pro** | **$49/mo** | 250,000 / mo | 100 | 10 MB | 20 attempts | 15 days |
+| **Enterprise** | **$149/mo** | Unlimited | Unlimited | 25 MB | 30 attempts | 30 days |
+
 ## Setup
 
 ### 1. Supabase
@@ -129,6 +140,6 @@ UptimeRobot ping target. Returns `{"status": "ok"}`.
 - **Header forwarding**: all original provider headers are captured and forwarded to the destination.
 - **HTTPS enforcement**: outbound delivery rejects non-HTTPS destinations with no retry.
 - **Deduplication**: `provider_event_id` unique constraint per endpoint prevents double-delivery when providers retry.
-- **Payload size limit**: 1 MB hard cap at ingestion.
-- **DB cleanup**: delivered rows older than 7 days are auto-purged every ~1 hour to protect Supabase's 500 MB free cap.
+- **Payload size limit**: Dynamic cap based on subscription plan (from 1 MB on Free up to 25 MB on Enterprise) enforced at ingestion.
+- **DB cleanup**: delivered events are auto-purged dynamically based on the plan's retention window (from 3 days on Free up to 30 days on Enterprise) to keep Supabase storage usage lean.
 

@@ -25,7 +25,8 @@ import httpx
 from app.cache import get_endpoint
 from app.config import settings
 from app.database import get_db
-from app.utils.backoff import calculate_next_retry, has_exceeded_max_retries
+from app.utils.backoff import calculate_next_retry
+from app.utils.tiers import get_tier_limits, TIERS
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +139,9 @@ async def _deliver_event_inner(event: dict) -> None:
 
     destination_url: str = ep["destination_url"]
 
-    # Reject non-HTTPS destinations immediately — no retry.
-    if not destination_url.startswith("https://"):
+    # Reject non-HTTPS destinations immediately (except for localhost/127.0.0.1 in local development).
+    is_local = destination_url.startswith("http://localhost") or destination_url.startswith("http://127.0.0.1")
+    if not (destination_url.startswith("https://") or is_local):
         logger.error(
             f"Event {event_id}: non-HTTPS destination {destination_url!r}, "
             "marking permanently failed."
@@ -190,10 +192,12 @@ async def _deliver_event_inner(event: dict) -> None:
     if success:
         await _mark_delivered(event_id)
     else:
+        plan = ep.get("plan", "Free") if ep else "Free"
+        limits = get_tier_limits(plan)
         new_retry_count = event["retry_count"] + 1
-        if has_exceeded_max_retries(new_retry_count):
+        if new_retry_count > limits.max_retries:
             logger.warning(
-                f"Event {event_id} exceeded {settings.MAX_RETRIES} retries → failed_permanently"
+                f"Event {event_id} exceeded plan '{plan}' max retries ({limits.max_retries}) → failed_permanently"
             )
             await _mark_permanently_failed(event_id)
         else:
@@ -230,25 +234,42 @@ async def _poll_and_deliver() -> None:
 
 async def _cleanup_old_delivered() -> None:
     """
-    Delete delivered rows older than CLEANUP_DELIVERED_AFTER_DAYS.
+    Delete delivered rows older than each plan's retention period.
     Keeps the Supabase free-tier storage from bloating.
     """
-    cutoff = (
-        datetime.now(timezone.utc)
-        - timedelta(days=settings.CLEANUP_DELIVERED_AFTER_DAYS)
-    ).isoformat()
-
     db = get_db()
-    result = await asyncio.to_thread(
-        lambda: db.table("webhook_events")
-        .delete()
-        .eq("status", "delivered")
-        .lt("delivered_at", cutoff)
-        .execute()
-    )
-    deleted = len(result.data) if result.data else 0
-    if deleted:
-        logger.info(f"Cleanup: removed {deleted} old delivered event(s)")
+    total_deleted = 0
+    
+    for plan_name, limits in TIERS.items():
+        # 1. Fetch endpoint IDs belonging to this plan
+        endpoints_res = await asyncio.to_thread(
+            lambda: db.table("endpoints")
+            .select("id")
+            .eq("plan", plan_name)
+            .execute()
+        )
+        ep_ids = [row["id"] for row in (endpoints_res.data or [])]
+        if not ep_ids:
+            continue
+            
+        # 2. Delete delivered events older than retention_days for these endpoints
+        cutoff = (
+            datetime.now(timezone.utc)
+            - timedelta(days=limits.retention_days)
+        ).isoformat()
+        
+        del_res = await asyncio.to_thread(
+            lambda: db.table("webhook_events")
+            .delete()
+            .eq("status", "delivered")
+            .lt("delivered_at", cutoff)
+            .in_("endpoint_id", ep_ids)
+            .execute()
+        )
+        total_deleted += len(del_res.data or [])
+        
+    if total_deleted:
+        logger.info(f"Cleanup: removed {total_deleted} old delivered event(s)")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

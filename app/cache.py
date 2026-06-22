@@ -26,13 +26,14 @@ async def _refresh_cache() -> None:
     db = get_db()
     result = await asyncio.to_thread(
         lambda: db.table("endpoints")
-        .select("id, user_api_key, destination_url")
+        .select("id, user_api_key, destination_url, plan")
         .execute()
     )
     _endpoint_cache = {
         row["id"]: {
             "user_api_key": row["user_api_key"],
             "destination_url": row["destination_url"],
+            "plan": row.get("plan", "Free"),
         }
         for row in (result.data or [])
     }

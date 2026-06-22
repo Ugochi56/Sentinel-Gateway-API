@@ -134,3 +134,23 @@ async def retry_event(
     logger.info(f"Event {event_id} reset to pending for retry")
     return {"status": "pending", "event_id": event_id}
 
+
+@router.post(
+    "/v1/test/fast-forward/{event_id}",
+    dependencies=[Depends(verify_proxy_secret)],
+    summary="Backdoor endpoint to fast-forward an event's retry clock (test only)",
+)
+async def test_fast_forward_event(
+    event_id: str,
+    x_rapidapi_user: str = Header(...),
+):
+    db = get_db()
+    await asyncio.to_thread(
+        lambda: db.table("webhook_events")
+        .update({"next_retry_at": "2020-01-01T00:00:00+00:00"})
+        .eq("id", event_id)
+        .eq("user_api_key", x_rapidapi_user)
+        .execute()
+    )
+    return {"status": "fast-forwarded", "event_id": event_id}
+

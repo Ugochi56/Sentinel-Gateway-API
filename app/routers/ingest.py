@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Path, Request, Response
 from app.cache import get_endpoint
 from app.config import settings
 from app.database import get_db
+from app.utils.tiers import get_tier_limits
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -73,36 +74,7 @@ async def ingest_webhook(
     endpoint_id: str = Path(..., description="UUID issued at registration"),
     request: Request = None,
 ):
-    # --- 1. Size check (fast path before reading body) ---
-    content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > settings.MAX_PAYLOAD_SIZE_BYTES:
-        raise HTTPException(status_code=413, detail="Payload exceeds 1 MB limit.")
-
-    # --- 2. Read raw body (preserves bytes for HMAC verification) ---
-    raw_body_bytes = await request.body()
-    if len(raw_body_bytes) > settings.MAX_PAYLOAD_SIZE_BYTES:
-        raise HTTPException(status_code=413, detail="Payload exceeds 1 MB limit.")
-
-    raw_body_str = raw_body_bytes.decode("utf-8", errors="replace")
-
-    # --- 3. Capture and sanitise incoming headers ---
-    headers_dict: dict[str, str] = {
-        k.lower(): v
-        for k, v in request.headers.items()
-        if k.lower() not in STRIP_HEADERS
-    }
-
-    # --- 4. Best-effort JSON parse (for /v1/logs display only) ---
-    payload = None
-    try:
-        payload = json.loads(raw_body_str)
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # --- 5. Extract provider event ID for deduplication ---
-    provider_event_id = _extract_provider_event_id(headers_dict, raw_body_str)
-
-    # --- 6. Verify endpoint exists (from in-memory cache — no DB round-trip) ---
+    # --- 1. Verify endpoint exists (from in-memory cache — no DB round-trip) ---
     ep = await get_endpoint(endpoint_id)
 
     if not ep:
@@ -111,6 +83,45 @@ async def ingest_webhook(
         return Response(status_code=200)
 
     user_api_key = ep["user_api_key"]
+    plan = ep.get("plan", "Free")
+    limits = get_tier_limits(plan)
+
+    # --- 2. Size check (fast path before reading body) ---
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > limits.max_payload_bytes:
+        limit_mb = limits.max_payload_bytes / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"Payload exceeds {limit_mb:.1f} MB limit for plan '{plan}'."
+        )
+
+    # --- 3. Read raw body (preserves bytes for HMAC verification) ---
+    raw_body_bytes = await request.body()
+    if len(raw_body_bytes) > limits.max_payload_bytes:
+        limit_mb = limits.max_payload_bytes / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"Payload exceeds {limit_mb:.1f} MB limit for plan '{plan}'."
+        )
+
+    raw_body_str = raw_body_bytes.decode("utf-8", errors="replace")
+
+    # --- 4. Capture and sanitise incoming headers ---
+    headers_dict: dict[str, str] = {
+        k.lower(): v
+        for k, v in request.headers.items()
+        if k.lower() not in STRIP_HEADERS
+    }
+
+    # --- 5. Best-effort JSON parse (for /v1/logs display only) ---
+    payload = None
+    try:
+        payload = json.loads(raw_body_str)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # --- 6. Extract provider event ID for deduplication ---
+    provider_event_id = _extract_provider_event_id(headers_dict, raw_body_str)
 
     # --- 7. Persist to queue ---
     db = get_db()
