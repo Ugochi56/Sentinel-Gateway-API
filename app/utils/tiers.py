@@ -46,13 +46,25 @@ def get_tier_limits(plan: str | None) -> TierLimits:
     if not plan:
         return TIERS["Free"]
     
-    # Normalize naming (e.g. "free" or "FREE" -> "Free")
+    # Normalize naming (e.g. "basic" or "BASIC" -> "Basic")
     norm = plan.strip().capitalize()
-    if norm in ("Ultra", "Mega"):
-        norm = "Enterprise"
-        
-    if norm in TIERS:
-        return TIERS[norm]
-        
-    return TIERS["Free"]
+    
+    # Map RapidAPI default plan names to our limits:
+    # - Basic ($0/mo) -> Free limits
+    # - Pro ($19/mo) -> Basic limits
+    # - Ultra ($49/mo) -> Pro limits
+    # - Mega ($199/mo) -> Enterprise limits
+    mapping = {
+        "Basic": "Free",
+        "Pro": "Basic",
+        "Ultra": "Pro",
+        "Mega": "Enterprise",
+        # Keep fallbacks for direct naming
+        "Free": "Free",
+        "Enterprise": "Enterprise",
+    }
+    
+    internal_name = mapping.get(norm, "Free")
+    return TIERS[internal_name]
+
 

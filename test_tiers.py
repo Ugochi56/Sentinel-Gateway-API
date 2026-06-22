@@ -93,7 +93,7 @@ def main():
             headers={
                 "x-rapidapi-proxy-secret": SECRET,
                 "x-rapidapi-user": USER_FREE,
-                "x-rapidapi-plan": "Free",
+                "x-rapidapi-plan": "Basic",
                 "content-type": "application/json",
             },
             json={"destination_url": MOCK_DESTINATION_URL, "label": f"free-endpoint-{i}"}
@@ -101,7 +101,7 @@ def main():
         assert r.status_code == 200, f"Registration failed at index {i}: {r.text}"
         free_endpoint_ids.append(r.json()["endpoint_id"])
 
-    assert_test("Successfully registered 5 endpoints on the Free plan", len(free_endpoint_ids) == 5)
+    assert_test("Successfully registered 5 endpoints on the Basic plan (Free limits)", len(free_endpoint_ids) == 5)
 
     # Try to register the 6th endpoint (must be blocked)
     r = client.post(
@@ -109,7 +109,7 @@ def main():
         headers={
             "x-rapidapi-proxy-secret": SECRET,
             "x-rapidapi-user": USER_FREE,
-            "x-rapidapi-plan": "Free",
+            "x-rapidapi-plan": "Basic",
             "content-type": "application/json",
         },
         json={"destination_url": MOCK_DESTINATION_URL, "label": "free-endpoint-6"}
@@ -129,11 +129,11 @@ def main():
     # Free Plan (1MB)
     # Send 500KB payload (should succeed)
     r = client.post(f"{GATEWAY_BASE}/hooks/{free_ep}", content=b"x" * 500_000)
-    assert_test("Free Plan: 500 KB payload accepted (200 OK)", r.status_code == 200)
+    assert_test("Basic Plan (Free limits): 500 KB payload accepted (200 OK)", r.status_code == 200)
 
     # Send 1.5MB payload (should be blocked)
     r = client.post(f"{GATEWAY_BASE}/hooks/{free_ep}", content=b"x" * 1_500_000)
-    assert_test("Free Plan: 1.5 MB payload rejected (413 Content Too Large)", r.status_code == 413)
+    assert_test("Basic Plan (Free limits): 1.5 MB payload rejected (413 Content Too Large)", r.status_code == 413)
 
     # Register an endpoint on Basic Plan (5MB limit)
     r = client.post(
@@ -141,7 +141,7 @@ def main():
         headers={
             "x-rapidapi-proxy-secret": SECRET,
             "x-rapidapi-user": USER_BASIC,
-            "x-rapidapi-plan": "Basic",
+            "x-rapidapi-plan": "Pro",
             "content-type": "application/json",
         },
         json={"destination_url": MOCK_DESTINATION_URL, "label": "basic-endpoint"}
@@ -152,11 +152,11 @@ def main():
 
     # Basic Plan: Send 1.5MB payload (should succeed!)
     r = client.post(f"{GATEWAY_BASE}/hooks/{basic_ep}", content=b"x" * 1_500_000)
-    assert_test("Basic Plan: 1.5 MB payload accepted (200 OK)", r.status_code == 200)
+    assert_test("Pro Plan (Basic limits): 1.5 MB payload accepted (200 OK)", r.status_code == 200)
 
     # Basic Plan: Send 6MB payload (should fail!)
     r = client.post(f"{GATEWAY_BASE}/hooks/{basic_ep}", content=b"x" * 6_000_000)
-    assert_test("Basic Plan: 6 MB payload rejected (413 Content Too Large)", r.status_code == 413)
+    assert_test("Pro Plan (Basic limits): 6 MB payload rejected (413 Content Too Large)", r.status_code == 413)
 
     # ==========================================================================
     # TEST 3: Max Retries (Free Plan = 5 attempts max)
@@ -223,7 +223,7 @@ def main():
         "x-rapidapi-user": USER_FREE,
     })
     status_res = r_status.json()
-    assert_test("Free Plan: Event marked 'failed_permanently' after 5 retry attempts", status_res["status"] == "failed_permanently")
+    assert_test("Basic Plan (Free limits): Event marked 'failed_permanently' after 5 retry attempts", status_res["status"] == "failed_permanently")
 
     # ==========================================================================
     # CLEANUP
